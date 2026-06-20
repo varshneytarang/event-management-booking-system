@@ -1,236 +1,218 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { format } from 'date-fns';
-import toast from 'react-hot-toast';
-import { getEvent } from '../api/events';
-import { createBooking } from '../api/bookings';
+import { useEvent } from '../hooks/useEvents';
+import { useCreateBooking } from '../hooks/useBookings';
 import { useAuth } from '../context/AuthContext';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Spinner from '../components/ui/Spinner';
+import ErrorMessage from '../components/ui/ErrorMessage';
 import Modal from '../components/ui/Modal';
 
 export default function EventDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { isAuthenticated } = useAuth();
+  const { data, isLoading, isError, refetch } = useEvent(id);
+  const { mutate: book, isPending: booking } = useCreateBooking();
 
-  const [event, setEvent] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [seats, setSeats] = useState(1);
-  const [booking, setBooking] = useState(false);
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const { data } = await getEvent(id);
-        setEvent(data.data.event);
-      } catch (err) {
-        toast.error(err.response?.data?.message || 'Event not found');
-        navigate('/events');
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, [id, navigate]);
+  const event = data?.data?.event;
 
-  const handleBook = async () => {
-    if (!user) { navigate('/login'); return; }
-    setBooking(true);
-    try {
-      const { data } = await createBooking({ eventId: event.id, seatsBooked: seats });
-      toast.success(`Booking confirmed! Ref: ${data.data.booking.bookingReference}`);
-      // Refresh seat count
-      const refreshed = await getEvent(id);
-      setEvent(refreshed.data.data.event);
-      setModalOpen(false);
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Booking failed');
-    } finally {
-      setBooking(false);
-    }
+  if (isLoading) return <Spinner fullPage />;
+  if (isError || !event) return <ErrorMessage message="Event not found" onRetry={refetch} />;
+
+  const pct = event.totalSeats > 0 ? (event.availableSeats / event.totalSeats) * 100 : 0;
+  const canBook = ['upcoming', 'ongoing'].includes(event.status) && event.availableSeats > 0;
+
+  const barGradient = pct > 50
+    ? 'linear-gradient(90deg, #10b981, #34d399)'
+    : pct > 20
+    ? 'linear-gradient(90deg, #f59e0b, #fbbf24)'
+    : 'linear-gradient(90deg, #ef4444, #f87171)';
+
+  const handleBook = () => {
+    if (!isAuthenticated) { navigate('/login', { state: { from: `/events/${id}` } }); return; }
+    setModalOpen(true);
   };
 
-  if (loading) return <Spinner />;
-  if (!event) return null;
-
-  const availPct = event.totalSeats > 0 ? (event.availableSeats / event.totalSeats) * 100 : 0;
-  const isSoldOut = event.availableSeats === 0;
-  const canBook = event.status === 'upcoming' || event.status === 'ongoing';
+  const handleConfirm = () => book({ eventId: event._id, seatsBooked: seats }, {
+    onSuccess: () => { setModalOpen(false); refetch(); },
+  });
 
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto', padding: '40px 24px' }}>
-      {/* Back */}
-      <button
-        onClick={() => navigate(-1)}
-        style={{
-          background: 'none', border: 'none', fontSize: 14,
-          color: 'var(--text-muted)', cursor: 'pointer',
-          marginBottom: 24, display: 'flex', alignItems: 'center', gap: 6,
-        }}
-      >
-        ← Back to Events
-      </button>
+    <div style={{ background: 'var(--bg)', minHeight: 'calc(100vh - 64px)' }}>
+      <div style={{ maxWidth: 960, margin: '0 auto', padding: '32px 24px 64px' }}>
+        {/* Breadcrumb */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 24, fontSize: 13, color: 'var(--text-muted)' }}>
+          <Link to="/events" style={{ color: 'var(--text-muted)', transition: 'color .15s' }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--primary)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; }}>
+            Events
+          </Link>
+          <span>/</span>
+          <span style={{ color: 'var(--text)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280 }}>{event.name}</span>
+        </div>
 
-      <div style={{
-        background: '#fff', borderRadius: 'var(--radius)',
-        boxShadow: 'var(--shadow)', overflow: 'hidden',
-        border: '1px solid var(--border)',
-      }}>
-        {/* Hero image */}
-        {event.imageUrl ? (
-          <img
-            src={event.imageUrl}
-            alt={event.name}
-            style={{ width: '100%', height: 340, objectFit: 'cover' }}
-          />
-        ) : (
-          <div style={{
-            height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'linear-gradient(135deg, var(--primary-light), #e0f2fe)',
-            fontSize: 64,
-          }}>
-            🎉
-          </div>
-        )}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 24 }}>
+          {/* Main card */}
+          <div style={{ background: '#fff', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)', overflow: 'hidden' }}>
+            {/* Hero image */}
+            <div style={{ position: 'relative', height: 360 }}>
+              {event.imageUrl ? (
+                <img src={event.imageUrl} alt={event.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+              ) : (
+                <div style={{ width: '100%', height: '100%', background: 'var(--grad-brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 80 }}>🎉</div>
+              )}
+              {/* Overlay gradient for text readability */}
+              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,.6) 0%, transparent 50%)' }} />
+              {/* Badges */}
+              <div style={{ position: 'absolute', top: 20, left: 20, display: 'flex', gap: 8 }}>
+                <Badge label={event.status} showDot />
+                <Badge label={event.category || 'General'} />
+              </div>
+              {/* Title overlay */}
+              <div style={{ position: 'absolute', bottom: 24, left: 32, right: 32 }}>
+                <h1 style={{ fontSize: 'clamp(20px,3.5vw,30px)', fontWeight: 900, color: '#fff', lineHeight: 1.25, letterSpacing: '-.3px', textShadow: '0 2px 8px rgba(0,0,0,.4)' }}>
+                  {event.name}
+                </h1>
+              </div>
+            </div>
 
-        <div style={{ padding: '36px 40px' }}>
-          {/* Badges */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-            <Badge label={event.status} />
-            <Badge label={event.category || 'General'} />
-          </div>
+            {/* Body */}
+            <div style={{ padding: '32px 36px' }}>
+              {/* Meta grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 16, marginBottom: 32 }}>
+                {[
+                  { icon: '📅', label: 'Date & Time', value: format(new Date(event.dateTime), 'MMMM d, yyyy'), sub: format(new Date(event.dateTime), 'h:mm a') },
+                  { icon: '📍', label: 'Venue', value: event.venue },
+                  { icon: '🎫', label: 'Total Seats', value: event.totalSeats.toLocaleString() },
+                  { icon: '✅', label: 'Available', value: event.availableSeats.toLocaleString(), highlight: true },
+                ].map((m) => (
+                  <div key={m.label} style={{
+                    padding: '16px 18px',
+                    background: m.highlight && pct === 0 ? 'var(--danger-light)' : 'var(--bg-muted)',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border)',
+                  }}>
+                    <div style={{ fontSize: 20, marginBottom: 8 }}>{m.icon}</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--text-light)', marginBottom: 4 }}>{m.label}</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: m.highlight && pct === 0 ? 'var(--danger)' : m.highlight ? 'var(--success)' : 'var(--text)' }}>
+                      {m.value}
+                    </div>
+                    {m.sub && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{m.sub}</div>}
+                  </div>
+                ))}
+              </div>
 
-          <h1 style={{ fontSize: 28, fontWeight: 800, marginBottom: 20, lineHeight: 1.3 }}>
-            {event.name}
-          </h1>
-
-          {/* Meta grid */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-            gap: 16, marginBottom: 28,
-          }}>
-            {[
-              { icon: '📅', label: 'Date & Time', value: format(new Date(event.dateTime), 'MMMM d, yyyy · h:mm a') },
-              { icon: '📍', label: 'Venue', value: event.venue },
-              { icon: '🎫', label: 'Total Seats', value: event.totalSeats.toLocaleString() },
-              { icon: '✅', label: 'Available', value: event.availableSeats.toLocaleString(), color: isSoldOut ? 'var(--danger)' : 'var(--success)' },
-            ].map((item) => (
-              <div key={item.label} style={{
-                padding: '16px', background: 'var(--bg-muted)',
-                borderRadius: 'var(--radius-sm)',
-              }}>
-                <div style={{ fontSize: 22, marginBottom: 6 }}>{item.icon}</div>
-                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '.4px', marginBottom: 2 }}>
-                  {item.label}
+              {/* Seat availability */}
+              <div style={{ marginBottom: 28, padding: '20px 22px', background: 'var(--bg-muted)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>Seat availability</span>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>
+                    {event.availableSeats} of {event.totalSeats} seats remaining ({Math.round(pct)}%)
+                  </span>
                 </div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: item.color || 'var(--text)' }}>
-                  {item.value}
+                <div style={{ height: 10, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${pct}%`, background: barGradient, borderRadius: 99, transition: 'width .5s ease' }} />
                 </div>
               </div>
-            ))}
-          </div>
 
-          {/* Seat progress */}
-          <div style={{ marginBottom: 28 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 13 }}>
-              <span style={{ color: 'var(--text-muted)' }}>Seat availability</span>
-              <span style={{ fontWeight: 700 }}>{Math.round(availPct)}% available</span>
-            </div>
-            <div style={{ height: 8, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
-              <div style={{
-                height: '100%', width: `${availPct}%`, borderRadius: 99,
-                background: availPct < 20 ? 'var(--danger)' : availPct < 50 ? 'var(--warning)' : 'var(--success)',
-                transition: 'width .4s',
-              }} />
+              {/* Description */}
+              <div style={{ marginBottom: 32 }}>
+                <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 12, color: 'var(--text)' }}>About this event</h2>
+                <p style={{ color: 'var(--text-muted)', lineHeight: 1.85, fontSize: 15 }}>{event.description}</p>
+              </div>
+
+              {/* CTA */}
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', paddingTop: 20, borderTop: '1px solid var(--border)' }}>
+                {canBook ? (
+                  <Button size="lg" onClick={handleBook} style={{ minWidth: 180 }}>
+                    🎟️ Book Seats
+                  </Button>
+                ) : pct === 0 ? (
+                  <div style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '12px 24px', background: 'var(--danger-light)',
+                    borderRadius: 'var(--radius-sm)', color: 'var(--danger)', fontWeight: 700,
+                  }}>
+                    Sold Out
+                  </div>
+                ) : (
+                  <div style={{ padding: '12px 24px', background: 'var(--bg-muted)', borderRadius: 'var(--radius-sm)', color: 'var(--text-muted)', fontWeight: 600, fontSize: 14 }}>
+                    Bookings not available
+                  </div>
+                )}
+                <Button variant="ghost" size="lg" onClick={() => navigate('/events')}>
+                  ← Back to Events
+                </Button>
+              </div>
             </div>
           </div>
-
-          {/* Description */}
-          <div style={{ marginBottom: 32 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>About this event</h2>
-            <p style={{ color: 'var(--text-muted)', lineHeight: 1.8, whiteSpace: 'pre-line' }}>
-              {event.description}
-            </p>
-          </div>
-
-          {/* CTA */}
-          {canBook && !isSoldOut ? (
-            <Button size="lg" onClick={() => { if (!user) { navigate('/login'); } else { setModalOpen(true); } }}>
-              🎟️ Book Seats
-            </Button>
-          ) : isSoldOut ? (
-            <div style={{
-              display: 'inline-flex', alignItems: 'center', gap: 8,
-              padding: '12px 24px', background: 'var(--danger-light)',
-              borderRadius: 'var(--radius-sm)', color: 'var(--danger)', fontWeight: 700,
-            }}>
-              😔 Sold Out
-            </div>
-          ) : (
-            <div style={{
-              display: 'inline-flex', alignItems: 'center', gap: 8,
-              padding: '12px 24px', background: 'var(--bg-muted)',
-              borderRadius: 'var(--radius-sm)', color: 'var(--text-muted)', fontWeight: 600,
-            }}>
-              Bookings not available
-            </div>
-          )}
         </div>
       </div>
 
       {/* Booking modal */}
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Book Seats">
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Confirm your booking" subtitle={event.name}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <div style={{ padding: 16, background: 'var(--bg-muted)', borderRadius: 'var(--radius-sm)' }}>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>{event.name}</div>
-            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-              {format(new Date(event.dateTime), 'MMM d, yyyy · h:mm a')} · {event.venue}
-            </div>
+          {/* Event summary */}
+          <div style={{ padding: '14px 16px', background: 'var(--bg-muted)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', fontSize: 13, color: 'var(--text-muted)' }}>
+            📅 {format(new Date(event.dateTime), 'MMM d, yyyy · h:mm a')} &nbsp;·&nbsp; 📍 {event.venue}
           </div>
 
+          {/* Seat picker */}
           <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 8 }}>
-              Number of seats (max 10)
-            </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <button
-                onClick={() => setSeats((s) => Math.max(1, s - 1))}
-                style={{
-                  width: 36, height: 36, borderRadius: '50%',
-                  border: '1.5px solid var(--border)', background: '#fff',
-                  fontSize: 18, cursor: 'pointer', fontWeight: 700,
+            <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 12 }}>
+              Number of seats <span style={{ color: 'var(--text-light)', fontWeight: 400 }}>(max 10)</span>
+            </p>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 0,
+              background: 'var(--bg-muted)', borderRadius: 'var(--radius-sm)',
+              border: '1.5px solid var(--border)', overflow: 'hidden',
+              width: 'fit-content',
+            }}>
+              {[
+                { label: '−', action: () => setSeats((s) => Math.max(1, s - 1)) },
+                null,
+                { label: '+', action: () => setSeats((s) => Math.min(Math.min(10, event.availableSeats), s + 1)) },
+              ].map((btn, i) => btn === null ? (
+                <span key="val" style={{
+                  fontSize: 20, fontWeight: 800, minWidth: 56, textAlign: 'center',
+                  padding: '10px 0', borderLeft: '1px solid var(--border)', borderRight: '1px solid var(--border)',
+                  background: '#fff',
+                }}>
+                  {seats}
+                </span>
+              ) : (
+                <button key={btn.label} onClick={btn.action} style={{
+                  width: 46, height: 46, background: 'none', border: 'none',
+                  fontSize: 18, cursor: 'pointer', color: 'var(--text)',
+                  fontWeight: 700, transition: 'background .15s',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}
-              >−</button>
-              <span style={{ fontSize: 24, fontWeight: 800, minWidth: 32, textAlign: 'center' }}>
-                {seats}
-              </span>
-              <button
-                onClick={() => setSeats((s) => Math.min(Math.min(10, event.availableSeats), s + 1))}
-                style={{
-                  width: 36, height: 36, borderRadius: '50%',
-                  border: '1.5px solid var(--border)', background: '#fff',
-                  fontSize: 18, cursor: 'pointer', fontWeight: 700,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}
-              >+</button>
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--border)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}>
+                  {btn.label}
+                </button>
+              ))}
             </div>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
-              {event.availableSeats} seat(s) remaining
+            <p style={{ fontSize: 12, color: 'var(--text-light)', marginTop: 8 }}>
+              {event.availableSeats} seat{event.availableSeats !== 1 ? 's' : ''} available
             </p>
           </div>
 
-          <div style={{ display: 'flex', gap: 12 }}>
-            <Button variant="secondary" onClick={() => setModalOpen(false)} style={{ flex: 1 }}>
-              Cancel
-            </Button>
-            <Button onClick={handleBook} loading={booking} style={{ flex: 2 }}>
-              Confirm {seats} seat{seats > 1 ? 's' : ''}
+          {/* Summary line */}
+          <div style={{ padding: '12px 16px', background: 'var(--primary-xlight)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--primary-light)', fontSize: 14, fontWeight: 600, color: 'var(--primary-dark)' }}>
+            You're booking {seats} seat{seats > 1 ? 's' : ''} for <em>{event.name}</em>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Button variant="secondary" onClick={() => setModalOpen(false)} style={{ flex: 1 }}>Cancel</Button>
+            <Button onClick={handleConfirm} loading={booking} style={{ flex: 2 }}>
+              Confirm booking
             </Button>
           </div>
         </div>

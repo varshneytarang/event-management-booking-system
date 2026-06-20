@@ -1,219 +1,245 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
-import toast from 'react-hot-toast';
-import { getMyBookings, cancelBooking } from '../api/bookings';
+import { useBookings, useCancelBooking } from '../hooks/useBookings';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Spinner from '../components/ui/Spinner';
+import ErrorMessage from '../components/ui/ErrorMessage';
 import Modal from '../components/ui/Modal';
 
 export default function BookingsPage() {
-  const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [cancelTarget, setCancelTarget] = useState(null);
-  const [cancelling, setCancelling] = useState(false);
-  const [filter, setFilter] = useState('all'); // all | confirmed | cancelled
+  const { data, isLoading, isError, refetch } = useBookings();
+  const { mutate: cancel, isPending: cancelling } = useCancelBooking();
+  const [target, setTarget] = useState(null);
+  const [filter, setFilter] = useState('all');
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const { data } = await getMyBookings();
-      setBookings(data.data.bookings);
-    } catch {
-      toast.error('Failed to load bookings');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  const handleCancel = async () => {
-    setCancelling(true);
-    try {
-      await cancelBooking(cancelTarget.id);
-      toast.success('Booking cancelled. Seats have been released.');
-      setCancelTarget(null);
-      load();
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Cancellation failed');
-    } finally {
-      setCancelling(false);
-    }
-  };
-
-  const filtered = bookings.filter((b) => filter === 'all' || b.status === filter);
+  const bookings = data?.data?.bookings || [];
+  const filtered  = filter === 'all' ? bookings : bookings.filter((b) => b.status === filter);
   const confirmed = bookings.filter((b) => b.status === 'confirmed').length;
   const cancelled = bookings.filter((b) => b.status === 'cancelled').length;
 
-  const chipStyle = (active) => ({
-    padding: '6px 16px', borderRadius: 99, fontSize: 13, fontWeight: 600,
-    border: '1.5px solid',
+  const chip = (active) => ({
+    padding: '7px 18px', borderRadius: 99, fontSize: 13, fontWeight: 600,
+    border: '1.5px solid', cursor: 'pointer',
+    transition: 'all .18s cubic-bezier(.16,1,.3,1)',
     borderColor: active ? 'var(--primary)' : 'var(--border)',
-    background: active ? 'var(--primary-light)' : '#fff',
-    color: active ? 'var(--primary)' : 'var(--text-muted)',
-    cursor: 'pointer',
+    background: active ? 'var(--primary)' : '#fff',
+    color: active ? '#fff' : 'var(--text-muted)',
+    boxShadow: active ? '0 2px 8px rgba(99,102,241,.25)' : 'none',
   });
 
+  // cancel passes the booking _id string to the mutation
+  const handleCancel = () =>
+    cancel(target._id, { onSuccess: () => setTarget(null) });
+
+  if (isLoading) return <Spinner fullPage />;
+  if (isError)   return <ErrorMessage message="Failed to load bookings" onRetry={refetch} />;
+
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto', padding: '40px 24px' }}>
-      <div style={{ marginBottom: 32 }}>
-        <h1 style={{ fontSize: 32, fontWeight: 800, marginBottom: 8 }}>My Bookings</h1>
-        <p style={{ color: 'var(--text-muted)' }}>Manage all your event bookings in one place</p>
+    <div>
+      {/* Page header */}
+      <div style={{
+        background: 'linear-gradient(180deg, var(--bg-muted) 0%, var(--bg) 100%)',
+        borderBottom: '1px solid var(--border)',
+        padding: '48px 28px 32px',
+      }}>
+        <div style={{ maxWidth: 900, margin: '0 auto' }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 10 }}>Account</p>
+          <h1 style={{ fontSize: 'clamp(24px,4vw,34px)', fontWeight: 900, letterSpacing: '-.4px', marginBottom: 6 }}>My Bookings</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: 15 }}>Track and manage all your event reservations</p>
+        </div>
       </div>
 
-      {/* Stats */}
-      {!loading && bookings.length > 0 && (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 16, marginBottom: 28,
-        }}>
+      <div style={{ maxWidth: 900, margin: '0 auto', padding: '28px 28px 64px' }}>
+        {/* Stats cards */}
+        {bookings.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16, marginBottom: 28 }}>
+            {[
+              { label: 'Total Bookings', value: bookings.length,       color: 'var(--primary)', bg: 'var(--primary-xlight)', border: 'var(--primary-light)' },
+              { label: 'Confirmed',      value: confirmed,             color: 'var(--success)',  bg: '#f0fdf4',               border: '#bbf7d0' },
+              { label: 'Cancelled',      value: cancelled,             color: 'var(--danger)',   bg: 'var(--danger-light)',   border: '#fecaca' },
+            ].map((s) => (
+              <div key={s.label} style={{
+                background: s.bg,
+                border: `1px solid ${s.border}`,
+                borderRadius: 'var(--radius-lg)',
+                padding: '22px 24px',
+              }}>
+                <div style={{ fontSize: 32, fontWeight: 900, color: s.color, letterSpacing: '-1px' }}>{s.value}</div>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Filter tabs */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
           {[
-            { label: 'Total Bookings', value: bookings.length, color: 'var(--primary)' },
-            { label: 'Confirmed', value: confirmed, color: 'var(--success)' },
-            { label: 'Cancelled', value: cancelled, color: 'var(--danger)' },
-          ].map((s) => (
-            <div key={s.label} style={{
-              background: '#fff', border: '1px solid var(--border)',
-              borderRadius: 'var(--radius)', padding: '20px 24px',
-              boxShadow: 'var(--shadow-sm)',
+            { key: 'all',       label: `All${bookings.length ? ` (${bookings.length})` : ''}` },
+            { key: 'confirmed', label: `Confirmed${confirmed ? ` (${confirmed})` : ''}` },
+            { key: 'cancelled', label: `Cancelled${cancelled ? ` (${cancelled})` : ''}` },
+          ].map(({ key, label }) => (
+            <button key={key} style={chip(filter === key)} onClick={() => setFilter(key)}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Empty state */}
+        {filtered.length === 0 ? (
+          <div style={{
+            textAlign: 'center', padding: '80px 24px',
+            background: '#fff', borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)',
+          }}>
+            <div style={{
+              width: 72, height: 72, borderRadius: '50%',
+              background: 'var(--primary-xlight)', margin: '0 auto 20px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30,
+            }}>🎟️</div>
+            <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+              {filter === 'all' ? 'No bookings yet' : `No ${filter} bookings`}
+            </h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: filter === 'all' ? 24 : 0 }}>
+              {filter === 'all' ? 'Start exploring events and make your first booking.' : ''}
+            </p>
+            {filter === 'all' && (
+              <Link to="/events"><Button>Browse Events</Button></Link>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {filtered.map((b) => (
+              <BookingCard key={b._id} booking={b} onCancel={() => setTarget(b)} />
+            ))}
+          </div>
+        )}
+
+        {/* Cancel confirmation modal */}
+        <Modal
+          open={!!target}
+          onClose={() => setTarget(null)}
+          title="Cancel this booking?"
+          subtitle={target?.eventId?.name}
+          maxWidth={440}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Warning box */}
+            <div style={{
+              padding: '14px 16px',
+              background: 'var(--danger-light)',
+              border: '1px solid #fecaca',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: 13, color: '#991b1b', lineHeight: 1.6,
             }}>
-              <div style={{ fontSize: 28, fontWeight: 800, color: s.color }}>{s.value}</div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>{s.label}</div>
+              <strong>{target?.seatsBooked} seat{target?.seatsBooked > 1 ? 's' : ''}</strong> will be released back to the event.
+              This action <strong>cannot be undone</strong>.
             </div>
-          ))}
-        </div>
-      )}
 
-      {/* Filter tabs */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-        {['all', 'confirmed', 'cancelled'].map((f) => (
-          <button key={f} style={chipStyle(filter === f)} onClick={() => setFilter(f)}>
-            {f.charAt(0).toUpperCase() + f.slice(1)}
-          </button>
-        ))}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <Button variant="secondary" onClick={() => setTarget(null)} style={{ flex: 1 }}>
+                Keep booking
+              </Button>
+              <Button variant="danger" onClick={handleCancel} loading={cancelling} style={{ flex: 1 }}>
+                Cancel booking
+              </Button>
+            </div>
+          </div>
+        </Modal>
       </div>
-
-      {loading ? (
-        <Spinner />
-      ) : filtered.length === 0 ? (
-        <div style={{
-          textAlign: 'center', padding: '80px 24px',
-          background: '#fff', borderRadius: 'var(--radius)',
-          border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)',
-        }}>
-          <div style={{ fontSize: 56, marginBottom: 16 }}>🎟️</div>
-          <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
-            {filter === 'all' ? 'No bookings yet' : `No ${filter} bookings`}
-          </h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 24 }}>
-            {filter === 'all' ? 'Start exploring events and make your first booking!' : ''}
-          </p>
-          {filter === 'all' && (
-            <Link to="/events">
-              <Button>Browse Events</Button>
-            </Link>
-          )}
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {filtered.map((booking) => (
-            <BookingCard
-              key={booking.id}
-              booking={booking}
-              onCancel={() => setCancelTarget(booking)}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Cancel confirmation modal */}
-      <Modal
-        open={!!cancelTarget}
-        onClose={() => setCancelTarget(null)}
-        title="Cancel Booking"
-        maxWidth={420}
-      >
-        <p style={{ color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.6 }}>
-          Are you sure you want to cancel your booking for{' '}
-          <strong style={{ color: 'var(--text)' }}>{cancelTarget?.event?.name}</strong>?
-        </p>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24 }}>
-          {cancelTarget?.seatsBooked} seat(s) will be released back to the event. This cannot be undone.
-        </p>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <Button variant="secondary" onClick={() => setCancelTarget(null)} style={{ flex: 1 }}>
-            Keep Booking
-          </Button>
-          <Button variant="danger" onClick={handleCancel} loading={cancelling} style={{ flex: 1 }}>
-            Yes, Cancel
-          </Button>
-        </div>
-      </Modal>
     </div>
   );
 }
 
 function BookingCard({ booking, onCancel }) {
-  const event = booking.event;
+  const event = booking.eventId; // populated by backend
   const isConfirmed = booking.status === 'confirmed';
-  const isPast = event && new Date(event.dateTime) < new Date();
+  const isPast      = event && new Date(event.dateTime) < new Date();
+  const canCancel   = isConfirmed && !isPast && event?.status !== 'cancelled';
 
   return (
     <div style={{
-      background: '#fff', borderRadius: 'var(--radius)',
-      border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)',
+      background: '#fff',
+      borderRadius: 'var(--radius-lg)',
+      border: '1px solid var(--border)',
+      boxShadow: 'var(--shadow-sm)',
       overflow: 'hidden',
-      opacity: booking.status === 'cancelled' ? 0.75 : 1,
-    }}>
-      <div style={{ display: 'flex', gap: 0 }}>
-        {/* Color bar */}
+      opacity: isConfirmed ? 1 : 0.68,
+      transition: 'box-shadow .18s',
+    }}
+      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = 'var(--shadow-md)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; }}
+    >
+      <div style={{ display: 'flex' }}>
+        {/* Status accent bar */}
         <div style={{
           width: 5, flexShrink: 0,
-          background: isConfirmed ? 'var(--success)' : 'var(--danger)',
+          background: isConfirmed
+            ? 'linear-gradient(180deg, #10b981, #059669)'
+            : 'linear-gradient(180deg, #ef4444, #dc2626)',
         }} />
 
         <div style={{ padding: '20px 24px', flex: 1 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
-            <div style={{ flex: 1 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {/* Badges */}
               <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                <Badge label={booking.status} />
+                <Badge label={booking.status} showDot />
                 {event && <Badge label={event.category || 'General'} />}
+                {isPast && (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-light)', textTransform: 'uppercase', letterSpacing: '.4px' }}>Past event</span>
+                )}
               </div>
 
-              <Link to={`/events/${event?.id}`} style={{ textDecoration: 'none' }}>
-                <h3 style={{
-                  fontSize: 16, fontWeight: 700, marginBottom: 8,
-                  color: 'var(--text)',
-                  ':hover': { color: 'var(--primary)' },
-                }}>
-                  {event?.name || 'Unknown Event'}
-                </h3>
+              {/* Event name */}
+              <Link
+                to={`/events/${event?._id}`}
+                style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', display: 'block', marginBottom: 10, lineHeight: 1.3 }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--primary)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text)'; }}
+              >
+                {event?.name || 'Unknown Event'}
               </Link>
 
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 20px', fontSize: 13, color: 'var(--text-muted)' }}>
+              {/* Meta row */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px 18px', fontSize: 13, color: 'var(--text-muted)' }}>
                 {event && (
                   <span>📅 {format(new Date(event.dateTime), 'MMM d, yyyy · h:mm a')}</span>
                 )}
                 {event && <span>📍 {event.venue}</span>}
                 <span>🎫 {booking.seatsBooked} seat{booking.seatsBooked > 1 ? 's' : ''}</span>
-                <span style={{ fontFamily: 'monospace', fontSize: 12, background: 'var(--bg-muted)', padding: '1px 8px', borderRadius: 4 }}>
-                  {booking.bookingReference}
-                </span>
               </div>
 
-              <div style={{ fontSize: 12, color: 'var(--text-light)', marginTop: 8 }}>
-                Booked {format(new Date(booking.createdAt), 'MMM d, yyyy')}
-                {booking.cancelledAt && ` · Cancelled ${format(new Date(booking.cancelledAt), 'MMM d, yyyy')}`}
+              {/* Footer row */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', marginTop: 10, alignItems: 'center' }}>
+                <code style={{
+                  fontSize: 11, fontFamily: 'var(--font-mono)',
+                  background: 'var(--bg-muted)', color: 'var(--text-muted)',
+                  padding: '3px 8px', borderRadius: 'var(--radius-xs)',
+                  border: '1px solid var(--border)',
+                }}>
+                  {booking.bookingReference}
+                </code>
+                <span style={{ fontSize: 12, color: 'var(--text-light)' }}>
+                  Booked {format(new Date(booking.createdAt), 'MMM d, yyyy')}
+                </span>
+                {booking.cancelledAt && (
+                  <span style={{ fontSize: 12, color: 'var(--danger)' }}>
+                    · Cancelled {format(new Date(booking.cancelledAt), 'MMM d, yyyy')}
+                  </span>
+                )}
               </div>
             </div>
 
-            {/* Actions */}
-            {isConfirmed && !isPast && event?.status !== 'cancelled' && (
-              <Button variant="ghost" size="sm" onClick={onCancel}
-                style={{ borderColor: 'var(--danger)', color: 'var(--danger)', flexShrink: 0 }}>
+            {/* Cancel button */}
+            {canCancel && (
+              <Button
+                variant="ghostDanger"
+                size="sm"
+                onClick={onCancel}
+                style={{ flexShrink: 0, alignSelf: 'flex-start' }}
+              >
                 Cancel
               </Button>
             )}

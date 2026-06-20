@@ -1,42 +1,54 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { getMe } from '../api/auth';
+import { getMeApi } from '../api/auth.api';
 
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  const [user, setUser]       = useState(() => {
+    try { return JSON.parse(localStorage.getItem('user')); } catch { return null; }
+  });
   const [loading, setLoading] = useState(true);
 
-  const loadUser = useCallback(async () => {
-    const token = localStorage.getItem('token');
+  // Verify token on mount — catches stale / tampered tokens
+  const hydrate = useCallback(async () => {
+    const token = localStorage.getItem('accessToken');
     if (!token) { setLoading(false); return; }
     try {
-      const { data } = await getMe();
+      const { data } = await getMeApi();
       setUser(data.data.user);
+      localStorage.setItem('user', JSON.stringify(data.data.user));
     } catch {
-      localStorage.removeItem('token');
+      localStorage.removeItem('accessToken');
       localStorage.removeItem('user');
+      setUser(null);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { loadUser(); }, [loadUser]);
+  useEffect(() => { hydrate(); }, [hydrate]);
 
-  const loginUser = (userData, token) => {
-    localStorage.setItem('token', token);
+  const setAuth = (userData, accessToken) => {
+    localStorage.setItem('accessToken', accessToken);
     localStorage.setItem('user', JSON.stringify(userData));
     setUser(userData);
   };
 
-  const logoutUser = () => {
-    localStorage.removeItem('token');
+  const clearAuth = () => {
+    localStorage.removeItem('accessToken');
     localStorage.removeItem('user');
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, loginUser, logoutUser, isAdmin: user?.role === 'admin' }}>
+    <AuthContext.Provider value={{
+      user,
+      loading,
+      isAuthenticated: !!user,
+      isAdmin: user?.role === 'admin',
+      setAuth,
+      clearAuth,
+    }}>
       {children}
     </AuthContext.Provider>
   );

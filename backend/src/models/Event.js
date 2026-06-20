@@ -1,67 +1,97 @@
-const { DataTypes } = require('sequelize');
-const sequelize = require('../config/database');
+const mongoose = require('mongoose');
 
-const Event = sequelize.define('Event', {
-  id: {
-    type: DataTypes.INTEGER,
-    primaryKey: true,
-    autoIncrement: true,
-  },
-  name: {
-    type: DataTypes.STRING,
-    allowNull: false,
-    validate: {
-      notEmpty: { msg: 'Event name is required' },
-      len: { args: [3, 200], msg: 'Event name must be between 3 and 200 characters' },
+const eventSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: [true, 'Event name is required'],
+      trim: true,
+      minlength: [3, 'Event name must be at least 3 characters'],
+      maxlength: [200, 'Event name cannot exceed 200 characters'],
+    },
+    description: {
+      type: String,
+      required: [true, 'Description is required'],
+      trim: true,
+      maxlength: [2000, 'Description cannot exceed 2000 characters'],
+    },
+    venue: {
+      type: String,
+      required: [true, 'Venue is required'],
+      trim: true,
+      maxlength: [300, 'Venue cannot exceed 300 characters'],
+    },
+    dateTime: {
+      type: Date,
+      required: [true, 'Date and time is required'],
+    },
+    totalSeats: {
+      type: Number,
+      required: [true, 'Total seats is required'],
+      min: [1, 'Total seats must be at least 1'],
+      validate: {
+        validator: Number.isInteger,
+        message: 'Total seats must be a whole number',
+      },
+    },
+    availableSeats: {
+      type: Number,
+      required: true,
+      min: [0, 'Available seats cannot be negative'],
+      validate: {
+        validator: Number.isInteger,
+        message: 'Available seats must be a whole number',
+      },
+    },
+    category: {
+      type: String,
+      trim: true,
+      default: 'General',
+      enum: ['Technology', 'Design', 'Business', 'Community', 'Music', 'Sports', 'General'],
+    },
+    imageUrl: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    status: {
+      type: String,
+      enum: ['upcoming', 'ongoing', 'completed', 'cancelled'],
+      default: 'upcoming',
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
     },
   },
-  description: {
-    type: DataTypes.TEXT,
-    allowNull: false,
-    validate: {
-      notEmpty: { msg: 'Description is required' },
+  {
+    timestamps: true,
+    toJSON: {
+      transform(_, ret) {
+        delete ret.__v;
+        return ret;
+      },
     },
-  },
-  dateTime: {
-    type: DataTypes.DATE,
-    allowNull: false,
-    validate: {
-      isDate: { msg: 'Must be a valid date' },
-    },
-  },
-  venue: {
-    type: DataTypes.STRING,
-    allowNull: false,
-    validate: {
-      notEmpty: { msg: 'Venue is required' },
-    },
-  },
-  totalSeats: {
-    type: DataTypes.INTEGER,
-    allowNull: false,
-    validate: {
-      min: { args: [1], msg: 'Total seats must be at least 1' },
-    },
-  },
-  availableSeats: {
-    type: DataTypes.INTEGER,
-    allowNull: false,
-    validate: {
-      min: { args: [0], msg: 'Available seats cannot be negative' },
-    },
-  },
-  category: {
-    type: DataTypes.STRING,
-    defaultValue: 'General',
-  },
-  imageUrl: {
-    type: DataTypes.STRING,
-    allowNull: true,
-  },
-  status: {
-    type: DataTypes.ENUM('upcoming', 'ongoing', 'completed', 'cancelled'),
-    defaultValue: 'upcoming',
-  },
+  }
+);
+
+// ── Indexes ────────────────────────────────────────────────────────────────────
+eventSchema.index({ dateTime: 1 });
+eventSchema.index({ status: 1 });
+eventSchema.index({ category: 1 });
+// Compound text index for search
+eventSchema.index({ name: 'text', description: 'text', venue: 'text' });
+
+// ── Virtual ────────────────────────────────────────────────────────────────────
+eventSchema.virtual('isSoldOut').get(function () {
+  return this.availableSeats === 0;
 });
 
+eventSchema.virtual('occupancyPercent').get(function () {
+  if (this.totalSeats === 0) return 100;
+  return Math.round(((this.totalSeats - this.availableSeats) / this.totalSeats) * 100);
+});
+
+const Event = mongoose.model('Event', eventSchema);
 module.exports = Event;
